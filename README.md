@@ -79,43 +79,71 @@ Cette méthode conserve l'historique Git et permet à Argo CD de détecter le ch
 1. Forker taskflow-gitops, inviter le binôme, ruleset sur main
 
 2. argocd/application.yaml : votre pseudo, puis kubectl apply (chacun sur son cluster)
-   ![Argo UI](captures/argo.png)
-   Argo en localhost
-   ![Changement du pseudo](captures/pseudo.png)
-   Mise a jour du repoURL dans application.yaml
-   ![Configuration du contexte](captures/kubectl.png)
-   Changement du contexte et apply de taskflow
+
+![Argo UI](captures/argo.png)
+
+Argo en localhost
+
+![Changement du pseudo](captures/pseudo.png)
+
+Mise a jour du repoURL dans application.yaml
+
+![Configuration du contexte](captures/kubectl.png)
+
+Changement du contexte et apply de taskflow
 
 3. Vérifier Synced + Healthy, puis ./scripts/observe.sh
-   ![get app terminal](captures/synced.png)
-   Vérification Synced + Healthy sur le terminal
-   ![Argo UI healthy](captures/healthy.png)
-   Vérification Synced + Healthy sur le dashboard
-   ![Observe](captures/observe.png)
-   On observe bien la version 1.0.0 avec le script
+
+![get app terminal](captures/synced.png)
+
+Vérification Synced + Healthy sur le terminal
+
+![Argo UI healthy](captures/healthy.png)
+
+Vérification Synced + Healthy sur le dashboard
+
+![Observe](captures/observe.png)
+
+On observe bien la version 1.0.0 avec le script
 
 4. PR : image 2.0.0. Mesurer le délai jusqu'au déploiement
-   ![Version 2.0.0 sur argo ui](captures/image2.png)
-   Version 2.0.0 sur argo
-   ![Watch des pods pendant la merge](captures/delaimerge.png)
-   Watch des pods pendant la merge
-   ![Watch pour voir combien de temps s'est écoulé apres la fin de la merge](captures/mesuredelai.png)
-   Watch pour voir combien de temps s'est écoulé apres la fin de la merge
+
+![Version 2.0.0 sur argo ui](captures/image2.png)
+
+Version 2.0.0 sur argo
+
+![Watch des pods pendant la merge](captures/delaimerge.png)
+
+Watch des pods pendant la merge
+
+![Watch pour voir combien de temps s'est écoulé apres la fin de la merge](captures/mesuredelai.png)
+
+Watch pour voir combien de temps s'est écoulé apres la fin de la merge
 
 5. Dérive : kubectl scale, kubectl set image. Que fait Argo CD ?
 
 **Scale**
+
 ![Scale d'un replica](captures/scale2.png)
+
 Commende pour scale 1 replicas
+
 ![Watch pendant le scale](captures/scale1.png)
+
 On observe que les 3 réplicas delete on été relancé automatiquement
 
 **Set image**
+
 ![Lancement de la commande pour v1.0.0](captures/setimage2.png)
+
 Commande pour passer a la version 1.0.0
+
 ![Watch pendant le set image](captures/setimage1.png)
+
 On observe une erreur
+
 ![Observe pour verifier la version](captures/setimage2.png)
+
 La version n'a pas changé
 
 On peut conclure que Git reste la source de vérité. Les modifications manuelles du cluster ne remplacent pas la configuration déclarée dans le dépôt.
@@ -123,10 +151,15 @@ On peut conclure que Git reste la source de vérité. Les modifications manuelle
 6. Bouton Revert sur la PR : retour en 1.0.0
 
 ![Observe avant/apres le revert](captures/revert.png)
+
 Observe avant/apres le revert
+
 ![Watch pendant le revert](captures/revert2.png)
+
 Watch pendant le revert, les pods ont redémarré
+
 ![Git log](captures/revert4.png)
+
 On observe bien un revert de la version 2.0.0
 
 Cette méthode conserve l'historique Git et permet à Argo CD de détecter le changement, puis de redéployer la version précédente.
@@ -151,49 +184,71 @@ Coût : Blue-Green double les pods (8 au lieu de 4) pendant la transition. Canar
 ### A • Blue-Green
 
 1. Remplacer deployment.yaml par exemples/bluegreen/ (PR)
+
 ![Git diff](<captures/1_Capture d’écran 2026-10-14 à 14.50.03.png>)
+
 Ajout de la stratégie Bluegreen avec déploiement
 
 2. PR: image 1.1.0
+
 `image: ghcr.io/9m7fjfpv9k-cyber/taskflow:1.1.0`
 
 3. observe.sh sur taskflow et taskflow-preview, compter les pods
+
 ![observe taskflow / observe taskdlow preview](<captures/2_Capture d’écran 2026-10-14 à 15.15.16.png>)
+
 Observe taskflow / Observe taskdlow-preview
 On observe que la preview passe à la version 1.1.0
 
 ![get pods](<captures/3_Capture d’écran 2026-10-14 à 15.15.39.png>)
+
 Les pods sont doublés
 
 4. promote, puis observe.sh
+
 ![Commande promote](<captures/4_Capture d’écran 2026-10-14 à 15.17.55.png>)
+
 ![Promote observe](<captures/5_Capture d’écran 2026-10-14 à 15.18.14.png>)
+
 Lorsque la commande promote a été lancé on observe que que taskflow passe aussi en 1.1.0
 
 ### B • Canary
 
 1. exemples/canary/rollout.yaml, image 1.1.0 (PR)
+
 ![rollout de cnaary](<captures/Capture d’écran 2026-10-14 à 16.29.50.png>)
+
 ![v1.1.0](<captures/Capture d’écran 2026-10-14 à 16.31.02.png>)
 
 2. PR : image 2.0.0, suivre avec --watch et observe.sh
+
 ![observe et watch](<captures/6_Capture d’écran 2026-10-14 à 15.49.45.png>)
+
 Dans le observe on voit que la version 2.0.0 a démarré
 Dans le watch on observe que 25% (1 sur 4) du traffic est mise a jour
 
 3. promote jusqu'à 100 %
+
 ![promote 50%](<captures/7_Capture d’écran 2026-10-14 à 15.50.46.png>)
+
 50% (2 pods sur 4)
+
 ![promote 75%](<captures/8_Capture d’écran 2026-10-14 à 15.52.31.png>)
+
 75% (3 pods sur 4)
+
 ![promote  100%](<captures/9_Capture d’écran 2026-10-14 à 15.53.33.png>)
+
 100% (4 pods sur 4)
 
 4. PR : image 2.1.O. Regardez les codes HTTP. Puis abort... et après ?
 
 ![image 2.1.0](<captures/10_Capture d’écran 2026-10-14 à 16.00.23.png>)
+
 A l'ajoute de l'image 2.1.0 -> Status en pause + http=500
 
 ![abort cmd](<captures/Capture d’écran 2026-10-14 à 16.35.11.png>)
+
 ![degraded](<captures/11_Capture d’écran 2026-10-14 à 16.04.25.png>)
+
 Apres l'abort le status passe en dégradé
