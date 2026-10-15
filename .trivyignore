@@ -1,0 +1,13 @@
+# Exception temporaire PSSI-R5 pour taskflow:2.2.0.
+# Justification : les versions corrigées ne sont pas encore disponibles dans l'image publiée.
+# Date d'approbation : 2026-10-15
+
+CVE-2025-62727
+CVE-2026-48818
+CVE-2026-54283
+CVE-2025-66418
+CVE-2025-66471
+CVE-2026-21441
+CVE-2026-44431
+CVE-2026-97687
+CVE-2026-97689
