@@ -4,6 +4,20 @@ Ce dépôt décrit **l'état voulu** de l'application TaskFlow dans Kubernetes.
 Argo CD le surveille et aligne le cluster dessus : pour changer la production,
 on ne tape pas de commande, on fait une **Pull Request**.
 
+## Sommaire
+
+- [Installation](#installation-à-faire-chez-vous-avant-le-cours) · [Structure](#structure) · [Images disponibles](#images-disponibles) · [Équipe](#équipe)
+- **Lab 1 : déployer par PR, dérive, retour arrière**
+  - [Livrable 1](#livrable-lab-1) : [Push ou Pull ?](#push-ou-pull-) · [Qui a corrigé quoi ?](#qui-a-corrigé-quoi-) · [Pourquoi `git revert` ?](#pourquoi-git-revert-)
+  - [Étapes et captures](#lab-1)
+- **Lab 2 : Blue-Green puis Canary**
+  - [Livrable 2](#livrable-2) : Blue-Green ou Canary pour TaskFlow ?
+  - [A • Blue-Green](#a--blue-green) · [B • Canary](#b--canary)
+- **Lab 3 : analyse automatique, abort, postmortem**
+  - [Livrable 3](#livrable-3) : AnalysisRun en échec (2.1.0) et en succès (2.2.0)
+  - [A • L'étalon et l'analyse](#a--létalon-et-lanalyse) · [B • L'incident](#b--lincident)
+  - [Postmortem 2.1.0](docs/postmortem-2.1.0.md)
+
 ## Installation (à faire chez vous, avant le cours)
 
 Prérequis : Docker Desktop démarré, 8 Go de RAM, 10 Go de disque libre.
@@ -284,3 +298,163 @@ L'abort renvoie immédiatement tout le trafic vers la version stable 2.0.0.
 
 Apres l'abort le status passe en dégradé
 → Et après ? Git demande toujours la 2.1.0 : il faut faire un revert de la PR pour que Git redevienne la source de vérité.
+
+## Livrable 3
+
+![AnalysisRun 2.1.0 en échec, 2.2.0 en succès](captures/postmortem/B4_5.png)
+
+- `taskflow-df976ccb5-6-2` (2.1.0) : **Failed**. k6 mesure 32 % d'erreurs et un p95 de 313 ms, au-delà des seuils (< 2 % et < 250 ms). Argo Rollouts abandonne seul le déploiement.
+- `taskflow-7ddd57d788-8-2` (2.2.0) : **Successful**. Les seuils sont respectés et le Rollout continue jusqu'à 100 %.
+
+→ L'analyse remplace la décision humaine : seule une version qui passe le test de charge dépasse 25 %. Détails dans [le postmortem](docs/postmortem-2.1.0.md).
+
+## Lab 3
+
+### A • L'étalon et l'analyse
+
+1. Sync fork, git pull, production en 2.0.0
+
+![PR retour en 2.0.0](<captures/postmortem/A1 PR.png>)
+
+Retour de l'image 2.1.0 à 2.0.0 par PR
+→ La production doit partir d'une version saine pour servir de référence.
+
+2. ./scripts/charge.sh http://taskflow → noter erreurs et p95
+
+![Test de charge en cours](captures/postmortem/A2_0.png)
+
+Test k6 : 5 utilisateurs virtuels pendant 30 s sur le service de production
+
+![Résultat de l'étalon](captures/postmortem/A2_1.png)
+
+Étalon de la 2.0.0 : **0,00 % d'erreurs, p95 = 10,05 ms**
+→ Ce sont nos valeurs de référence. Les seuils du test sont < 2 % d'erreurs et un p95 < 250 ms.
+
+3. PR feat/analyse-auto : supprimer deployment.yaml, copier les 4 fichiers de exemples/robustesse/
+
+![Fichiers de robustesse](captures/postmortem/A3.png)
+
+`analysis-template.yaml`, `configmap-k6.yaml`, `rollout.yaml` et `service-canary.yaml` sont copiés dans `apps/taskflow`
+→ Le Rollout lance désormais k6 automatiquement au palier de 25 %.
+
+4. apps/taskflow : un Rollout, aucun Deployment. Vérifier les CRD et get analysistemplate,configmap,svc
+
+![Vérifications](captures/postmortem/A4.png)
+
+Rollout `Healthy` en 2.0.0, CRD Argo présentes, aucun Deployment, AnalysisTemplate `robustesse-k6`, ConfigMap `k6-robustesse` et Service `taskflow-canary` créés
+→ Sans les CRD, Argo CD refuserait les ressources `AnalysisTemplate`. Le service `taskflow-canary` permet de tester uniquement la nouvelle version.
+
+### B • L'incident
+
+1. PR : image 2.1.0. --watch, et ne touchez à rien
+
+![Démarrage du canary 2.1.0](captures/postmortem/B1_0.png)
+
+Le pod 2.1.0 démarre (révision 6), objectif 25 %
+
+![AnalysisRun en cours](captures/postmortem/B1_1.png)
+
+Au palier de 25 %, après 20 s de pause, l'AnalysisRun lance le Job k6 sur `taskflow-canary`
+
+![AnalysisRun en échec](captures/postmortem/B1_2.png)
+
+L'AnalysisRun passe en **Failed**, puis le Rollout passe en **Degraded** : `RolloutAborted ... failed (1) > failureLimit (0)`
+→ Abort automatique : aucune intervention humaine.
+
+![Retour en 2.0.0](captures/postmortem/B1_3.png)
+
+![4 pods 2.0.0](captures/postmortem/B1_4.png)
+
+Le pod 2.1.0 est supprimé et les 4 pods repassent en 2.0.0
+→ Le trafic revient sur la version stable en moins d'une minute.
+
+2. Enquête : réunir les 4 preuves
+
+**Preuve 1 : l'AnalysisRun**
+
+![describe analysisrun](captures/postmortem/B2_1.png)
+
+![describe analysisrun, statut](captures/postmortem/B2_2.png)
+
+`kubectl describe analysisrun` : cible `http://taskflow-canary`, phase `Failed`, de 09:23:48 à 09:24:25 UTC
+
+**Preuve 2 : les logs k6**
+
+![logs k6](captures/postmortem/B2_3.png)
+
+![logs k6, suite](captures/postmortem/B2_4.png)
+
+![logs k6, seuils](captures/postmortem/B2_5.png)
+
+Les deux seuils sont dépassés : **32,33 % d'erreurs** (97/300) et **p95 = 312,76 ms**
+→ Comparée à l'étalon (0 % et 10 ms), la 2.1.0 est environ 30 fois plus lente sur `/tasks` et renvoie 1 erreur sur 3.
+
+**Preuve 3 : les événements**
+
+![events](captures/postmortem/B2_6.png)
+
+Chronologie complète : passage à 25 %, pause de 20 s, lancement de l'analyse, `MetricFailed`, `RolloutAborted`, retour à 4 pods 2.0.0
+→ Les readiness probes ne testent que `/health`, qui répondait correctement. Seul le test de charge a détecté le problème.
+
+3. Revert de la PR 2.1.0
+
+![PR revert](captures/postmortem/B3_1.png)
+
+PR #16 : revert de la 2.1.0, mergée
+
+![Rollout healthy](captures/postmortem/B3_2.png)
+
+![Révision 7](captures/postmortem/B3_3.png)
+
+![get rollout](captures/postmortem/B3_4.png)
+
+Le Rollout repasse **Healthy** (révision 7) en 2.0.0
+→ L'abort avait protégé le cluster, mais Git demandait toujours la 2.1.0. Le revert remet Git et le cluster en accord.
+
+![describe après revert](captures/postmortem/B3_5.png)
+
+![events après revert](captures/postmortem/B3_6.png)
+
+L'AnalysisRun en échec reste visible dans l'historique : `Rollback to stable ReplicaSets`, puis `Rollout updated to revision 7`
+
+4. PR : image 2.2.0, suivre jusqu'à 100 %
+
+![PR 2.2.0](captures/postmortem/B4_1.png)
+
+PR #17 : image 2.0.0 → 2.2.0
+
+![Canary 2.2.0](captures/postmortem/B4_2.png)
+
+![Analyse 2.2.0 en cours](captures/postmortem/B4_3.png)
+
+Même scénario : 25 %, puis AnalysisRun `taskflow-7ddd57d788-8-2`
+
+![100 % en 2.2.0](captures/postmortem/B4_4.png)
+
+AnalysisRun **Successful**, puis 50 %, 75 % et 100 % automatiquement, avec 4 pods 2.2.0
+→ La version passe le même contrôle que la 2.1.0 et peut aller jusqu'à 100 %.
+
+![observe et analysisrun](captures/postmortem/B4_5.png)
+
+`observe.sh` montre la bascule en cours (34 × 2.0.0, 6 × 2.2.0, tout en http=200). On voit côte à côte l'AnalysisRun de la 2.1.0 (Failed) et celle de la 2.2.0 (Successful).
+
+![describe analysisrun 2.2.0](captures/postmortem/B4_6.png)
+
+![describe analysisrun 2.2.0, statut](captures/postmortem/B4_7.png)
+
+![logs k6 2.2.0](captures/postmortem/B4_8.png)
+
+![logs k6 2.2.0, suite](captures/postmortem/B4_9.png)
+
+![logs k6 2.2.0, seuils](captures/postmortem/B4_10.png)
+
+Résultat k6 sur la 2.2.0 : **0,00 % d'erreurs, p95 = 12,67 ms**
+→ Des valeurs proches de l'étalon de la 2.0.0 : pas de régression.
+
+![events 2.2.0](captures/postmortem/B4_11.png)
+
+Événements : `AnalysisRunSuccessful`, puis paliers 50 % et 75 % jusqu'à la révision 8 complète
+
+5. docs/postmortem-2.1.0.md
+
+Voir [le postmortem de l'incident 2.1.0](docs/postmortem-2.1.0.md).
