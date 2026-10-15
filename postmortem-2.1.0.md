@@ -25,7 +25,7 @@
 | ≈ 09:41 | Merge de la PR #16 (revert de la 2.1.0) → Rollout révision 7, `Healthy`, 100 % 2.0.0 |
 | ensuite | PR #17 : image 2.2.0, AnalysisRun `taskflow-7ddd57d788-8-2` **Successful**, déploiement jusqu'à 100 % |
 
-![Abort automatique](../captures/postmortem/B1_3.png)
+![Abort automatique](captures/postmortem/B1_3.png)
 
 ## Composant défaillant et cause racine
 
@@ -37,7 +37,7 @@
   | `http_req_duration` p95 | 10,05 ms | **312,76 ms** | < 250 ms |
   | Débit | 24,2 req/s | 9,8 req/s | — |
 
-  ![Logs k6 de l'AnalysisRun](../captures/postmortem/B2_5.png)
+  ![Logs k6 de l'AnalysisRun](captures/postmortem/B2_5.png)
 
 - **Pourquoi les probes Kubernetes ne l'ont-elles pas vu ?** Les probes `readiness` et `liveness` n'interrogent que `/health`, qui répondait correctement. Le pod 2.1.0 était donc `Running 1/1`. Les probes vérifient que le processus est vivant, pas que le service rend bien son travail ni dans quels délais.
 - **Cause racine :** une régression de la 2.1.0 sur `/tasks` (environ +300 ms par requête et une requête sur trois en erreur) est arrivée en production sans test de performance avant le merge. Seule l'analyse k6 au palier de 25 % pouvait la détecter.
