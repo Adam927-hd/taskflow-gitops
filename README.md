@@ -16,7 +16,7 @@ on ne tape pas de commande, on fait une **Pull Request**.
 - **Lab 3 : analyse automatique, abort, postmortem**
   - [Livrable 3](#livrable-3) : AnalysisRun en échec (2.1.0) et en succès (2.2.0)
   - [A • L'étalon et l'analyse](#a--létalon-et-lanalyse) · [B • L'incident](#b--lincident)
-  - [Postmortem 2.1.0](docs/postmortem-2.1.0.md)
+  - [Postmortem 2.1.0](postmortem-2.1.0.md)
 
 ## Installation (à faire chez vous, avant le cours)
 
@@ -306,7 +306,7 @@ Apres l'abort le status passe en dégradé
 - `taskflow-df976ccb5-6-2` (2.1.0) : **Failed**. k6 mesure 32 % d'erreurs et un p95 de 313 ms, au-delà des seuils (< 2 % et < 250 ms). Argo Rollouts abandonne seul le déploiement.
 - `taskflow-7ddd57d788-8-2` (2.2.0) : **Successful**. Les seuils sont respectés et le Rollout continue jusqu'à 100 %.
 
-→ L'analyse remplace la décision humaine : seule une version qui passe le test de charge dépasse 25 %. Détails dans [le postmortem](docs/postmortem-2.1.0.md).
+→ L'analyse remplace la décision humaine : seule une version qui passe le test de charge dépasse 25 %. Détails dans [le postmortem](postmortem-2.1.0.md).
 
 ## Lab 3
 
@@ -457,4 +457,4 @@ Résultat k6 sur la 2.2.0 : **0,00 % d'erreurs, p95 = 12,67 ms**
 
 5. docs/postmortem-2.1.0.md
 
-Voir [le postmortem de l'incident 2.1.0](docs/postmortem-2.1.0.md).
+Voir [le postmortem de l'incident 2.1.0](postmortem-2.1.0.md).
