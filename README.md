@@ -17,6 +17,9 @@ on ne tape pas de commande, on fait une **Pull Request**.
   - [Livrable 3](#livrable-3) : AnalysisRun en échec (2.1.0) et en succès (2.2.0)
   - [A • L'étalon et l'analyse](#a--létalon-et-lanalyse) · [B • L'incident](#b--lincident)
   - [Postmortem 2.1.0](postmortem-2.1.0.md)
+- **Lab 4 : la mini-PSSI en quality gates**
+  - [Livrable 4](#livrable-4) : tableau règle → contrôle → outil → preuve
+  - [Étapes et captures](#lab-4)
 
 ## Installation (à faire chez vous, avant le cours)
 
@@ -458,3 +461,101 @@ Résultat k6 sur la 2.2.0 : **0,00 % d'erreurs, p95 = 12,67 ms**
 5. docs/postmortem-2.1.0.md
 
 Voir [le postmortem de l'incident 2.1.0](postmortem-2.1.0.md).
+
+## Livrable 4
+
+Chaque règle de la [mini-PSSI](policies/pssi.md) est vérifiée automatiquement sur chaque PR. Une règle non respectée bloque le merge.
+
+| Règle | Contrôle | Outil | Preuve |
+| --- | --- | --- | --- |
+| **PSSI-R1** : tag explicite, jamais `latest` | `deny` si l'image n'a pas de `:` ou se termine par `:latest` | conftest (job « PSSI manifests ») | PR #22 `nginx:latest` bloquée ([capture](captures/pssi/5_2_pr_invalid_trivy_echec.png)) |
+| **PSSI-R2** : images du registre `ghcr.io/9m7fjfpv9k-cyber/` uniquement | `deny` si l'image ne commence pas par le registre autorisé | conftest (job « PSSI manifests ») | Même PR #22 : `nginx` refusée ([capture](captures/pssi/5_2_pr_invalid_trivy_echec.png)) |
+| **PSSI-R3** : limite de mémoire sur chaque conteneur | `deny` si `resources.limits.memory` est absent | conftest (job « PSSI manifests ») | Règle écrite ([capture](captures/pssi/2_1_ajout_R3_R4.png)). Le Rollout passe avec `limits.memory: 256Mi` ([capture](captures/pssi/3_1_ajout_security_confest_valid.png)). |
+| **PSSI-R4** : pods jamais en root | `deny` si `securityContext.runAsNonRoot` n'est pas `true` | conftest (job « PSSI manifests ») | Échec avant correction ([capture](captures/pssi/2_2_cmd_confest_echec.png)), puis 25/25 tests OK après l'ajout du `securityContext` ([capture](captures/pssi/3_1_ajout_security_confest_valid.png)) |
+| **PSSI-R5** : aucune CVE HIGH/CRITICAL corrigeable | Scan `--severity HIGH,CRITICAL --ignore-unfixed --exit-code 1` | Trivy (job « PSSI images ») | 9 CVE HIGH détectées dans `taskflow:2.2.0` ([capture](captures/pssi/6_2_echec_trivy_detail.png)), puis exception dans `.trivyignore` ([capture](captures/pssi/7_1_trivyingnore.png)) et job vert ([capture](captures/pssi/7_2_trivy_valid.png)) |
+| **Toutes** : merge impossible si un check est rouge | Status checks obligatoires sur `main` | Ruleset GitHub | Les 2 checks sont `Required` ([capture](captures/pssi/5_1_ruleset.png)), bouton Merge grisé sur la PR #22 |
+
+**La PR bloquée :**
+
+![PR non conforme bloquée](captures/pssi/5_2_pr_invalid_trivy_echec.png)
+
+→ La PR #22 (`nginx:latest`) est approuvée, mais le check **Required** `PSSI manifests (conftest)` est rouge : le bouton **Merge pull request** est grisé. La règle l'emporte sur l'approbation humaine.
+
+## Lab 4
+
+1. Lire pssi.md et kubernetes.rego, puis conftest test apps/ --policy policies/
+
+![Lecture de la PSSI](captures/pssi/1_1_Lecture.png)
+
+Les 5 règles de `pssi.md`, et leur traduction en Rego dans `kubernetes.rego` (R1 et R2 fournies, R3 et R4 à écrire)
+
+![conftest avant R3/R4](captures/pssi/1_2_cmd_confest.png)
+
+`15 tests, 15 passed`
+→ Tout passe, puisque seules R1 et R2 existent encore.
+
+2. Écrire R3 et R4. Relancer : votre Rollout échoue sur R4
+
+![Ajout de R3 et R4](captures/pssi/2_1_ajout_R3_R4.png)
+
+R3 : `not c.resources.limits.memory`. R4 : une règle `pod_non_root`, puis `not pod_non_root` dans un `deny`.
+
+![conftest échoue sur R4](captures/pssi/2_2_cmd_confest_echec.png)
+
+`FAIL - PSSI-R4 : le Rollout 'taskflow' ne déclare pas securityContext.runAsNonRoot: true` (24 passés, 1 échec)
+→ La règle détecte un vrai écart. R3 passe déjà, car le Rollout a une limite de 256Mi.
+
+3. Ajouter securityContext: runAsNonRoot: true au pod
+
+![securityContext et conftest OK](captures/pssi/3_1_ajout_security_confest_valid.png)
+
+`securityContext.runAsNonRoot: true` au niveau du pod, puis `25 tests, 25 passed`
+→ L'image tourne déjà avec l'utilisateur non-root UID 10001 : le pod démarre sans problème.
+
+4. Copier exemples/ci/pssi-github.yml en .github/workflows/pssi.yml, PR, merge
+
+![Trivy en échec](captures/pssi/4_1_action_trivy_echec.png)
+
+Sur la PR #21, conftest passe, mais **Trivy échoue** sur `taskflow:2.2.0` (exit code 1)
+
+![PR mergée avec Trivy rouge](captures/pssi/4_2_pr_valid_echec_trivy.png)
+
+PR #21 mergée avec 1 check sur 2 réussi
+→ Le ruleset n'était pas encore actif, donc rien n'empêchait le merge. C'est exactement ce que corrige l'étape 5.
+
+5. Ruleset : rendre obligatoires « PSSI manifests (conftest) » et « PSSI images (Trivy) »
+
+![Ruleset](captures/pssi/5_1_ruleset.png)
+
+**Require status checks to pass**, avec les deux checks PSSI ajoutés
+→ Les checks n'apparaissent qu'après avoir tourné une première fois, d'où l'ordre des étapes 4 puis 5.
+
+6. PR non conforme (latest, nginx...) : capturer le blocage
+
+![nginx:latest](captures/pssi/6_1_nginx_latest.png)
+
+`image: nginx:latest` : enfreint R1 (`latest`) et R2 (registre non autorisé)
+
+![PR bloquée](captures/pssi/5_2_pr_invalid_trivy_echec.png)
+
+PR #22 : `PSSI manifests (conftest)` rouge et **Required**, bouton Merge grisé malgré l'approbation
+→ Trivy est vert ici, car il ne scanne que les images du registre autorisé. C'est R2 (conftest) qui bloque `nginx`. Les deux outils sont complémentaires.
+
+7. Trivy rouge ? Corriger ou exception datée dans .trivyignore
+
+![Détail Trivy](captures/pssi/6_2_echec_trivy_detail.png)
+
+`Total: 9 (HIGH: 9, CRITICAL: 0)` dans les dépendances Python de l'image : `starlette` 0.41.3 (3 CVE) et `urllib3` 1.26.20 (6 CVE), toutes corrigées dans des versions plus récentes
+→ Corriger demanderait de reconstruire l'image, ce qui n'est pas possible ici puisque les images sont fournies. Nous posons donc une exception.
+
+![.trivyignore](captures/pssi/7_1_trivyingnore.png)
+
+`.trivyignore` : les 9 CVE, avec la justification et la date d'approbation
+→ L'exception est écrite, justifiée, datée et validée en PR, comme l'exige `pssi.md`.
+
+![Trivy vert](captures/pssi/7_2_trivy_valid.png)
+
+![PR #23 mergée](captures/pssi/7_3_pr_valid_trivy_valid.png)
+
+PR #23 : les 2 checks passent, puis merge sur `main`
+→ La production respecte de nouveau toutes les règles, et l'exception reste tracée dans Git.
